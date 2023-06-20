@@ -1,79 +1,88 @@
-CREATE DATABASE IF NOT EXISTS homework_6;
-
--- Создайте функцию, которая принимает кол-во сек и 
--- форматирует их в кол-во дней, часов, минут и секунд.
-
-SET @@SESSION.SQL_LOG_BIN=0; -- отключаем бинарное логирование только для текущей сессии
-
-DELIMITER //
-
--- Создаем  функцию sekonds_format, которая принимает один аргумент 
--- типа INT и возвращает значение типа VARCHAR(55).
-CREATE FUNCTION seconds_format(seconds INT)  
-RETURNS VARCHAR(55)
-
-/* Атрибут ниже указывает на то, что функция всегда возвращает 
-одинаковый результат для одинаковых входных параметров и не имеет побочных эффектов. 
-Если функция не детерминирована, то ее результат может быть разным для одинаковых входных параметров, 
-что может привести к непредсказуемому поведению запросов
+/*
+Создайте таблицу users_old, аналогичную таблице users. 
+Создайте процедуру, с помощью которой можно переместить любого (одного) пользователя из таблицы users в таблицу users_old. 
+(использование транзакции с выбором commit или rollback – обязательно).
 */
-DETERMINISTIC 
 
--- Атрибут ниже указывает на то, что функция не изменяет данные в 
--- базе данных и не использует таблицы с возможностью изменения данных 
-READS SQL DATA
+DROP TABLE IF EXISTS users_old;
+CREATE TABLE users_old (
+	id INT PRIMARY KEY auto_increment, 
+    firstname varchar(50), 
+    lastname varchar(50), 
+    email varchar(120)
+);
 
--- Этот блок кода объявляет четыре локальные 
--- переменные внутри функции: days, hours, minutes и formated.
+DELIMITER $$
+DROP PROCEDURE IF EXISTS move;
+CREATE PROCEDURE  move (IN num1 INT) 
+	DETERMINISTIC
 BEGIN
-    DECLARE days INT;
-    DECLARE hours INT;
-    DECLARE minutes INT;
-    DECLARE formatted VARCHAR(55);
-
--- Вычисление 
-    SET days = FLOOR(seconds / (24 * 3600));
-    SET seconds = seconds % (24 * 3600);
-    SET hours = FLOOR(seconds / 3600);
-    SET seconds = seconds % 3600;
-    SET minutes = FLOOR(seconds / 60);
-    SET seconds = seconds % 60;
-
--- Объединяем значения дней, часов, минут и секунд в одну строку, используя функцию CONCAT.
-    SET formatted = CONCAT(days, " days ", hours, " hours ", minutes, " minutes ", seconds, " seconds");
-
--- Завершаем функцию и указывает, что функция должна 
--- вернуть значение переменной formated.
-    RETURN formatted;
-END //
+INSERT INTO users_old (firstname,lastname,email) 
+SELECT firstname, lastname, email 
+	FROM users 
+	WHERE users.id = num1;
+DELETE FROM users 
+	WHERE id = num1;
+COMMIT;
+END$$
 
 DELIMITER ;
 
-SELECT seconds_format(123456);
+CALL move(7); -- Проверяем.
 
 
--- Задание 2
--- Выведите только четные числа от 1 до 10 включительно. 
--- (Через функцию / процедуру) Пример: 2,4,6,8,10 (можно сделать через шаг + 2: х = 2, х+=2)
 
-DROP PROCEDURE IF EXISTS even_numbers;
-DELIMITER //
-CREATE PROCEDURE even_numbers()
+/*
+2. Создайте хранимую функцию hello(), которая будет возвращать приветствие, в зависимости от текущего времени суток. 
+С 6:00 до 12:00 функция должна возвращать фразу "Доброе утро", с 12:00 до 18:00 функция должна возвращать фразу "Добрый день", 
+с 18:00 до 00:00 — "Добрый вечер", с 00:00 до 6:00 — "Доброй ночи".
+*/
+
+DELIMITER $$
+CREATE FUNCTION hello() 
+	RETURNS VARCHAR(25)
+	DETERMINISTIC
 BEGIN
-    DECLARE x INT DEFAULT 1;
-    DECLARE result VARCHAR(45) DEFAULT '';
-    WHILE x <= 10 DO
-        IF x % 2 = 0 THEN
-            IF result = '' THEN
-                SET result = x;
-            ELSE
-                SET result = CONCAT(result, ',', x);
-            END IF;
-        END IF;
-        SET x = x + 1;
-    END WHILE;
-    SELECT result;
-END //
+DECLARE result_text VARCHAR(25);
+SELECT CASE 
+	WHEN CURRENT_TIME >= '12:00:00' AND  CURRENT_TIME < '18:00:00' THEN 'Добрый день'
+	WHEN CURRENT_TIME >= '06:00:00' AND  CURRENT_TIME < '12:00:00' THEN 'Доброе утро'
+	WHEN CURRENT_TIME >= '00:00:00' AND  CURRENT_TIME < '06:00:00' THEN 'Доброй ночи'
+	ELSE 'Добрый вечер'
+END INTO result_text;
+RETURN result_text;
+END$$
+
 DELIMITER ;
 
-CALL even_numbers();
+SELECT hello(); -- Проверяем.
+
+/* 
+ 3. (по желанию)* Создайте таблицу logs типа Archive. Пусть при каждом создании записи в таблицах users, 
+ communities и messages в таблицу logs помещается время и дата создания записи, название 
+ таблицы, идентификатор первичного ключа.
+*/
+
+DROP TABLE IF EXISTS logs;
+
+CREATE TABLE logs (
+    created_at DATETIME DEFAULT now(),
+    table_name VARCHAR(20) NOT NULL,
+    pk_id INT UNSIGNED NOT NULL
+)  ENGINE=ARCHIVE;
+
+CREATE 
+    TRIGGER  users_log
+ AFTER INSERT ON users FOR EACH ROW 
+    INSERT INTO logs SET table_name = 'users' , pk_id = NEW.id;
+
+CREATE 
+    TRIGGER  communities_log
+ AFTER INSERT ON communities FOR EACH ROW 
+    INSERT INTO logs SET table_name = 'communities' , pk_id = NEW.id;
+
+CREATE 
+    TRIGGER  messages_log
+AFTER INSERT ON messages FOR EACH ROW 
+    INSERT INTO logs SET table_name = 'messages' , pk_id = NEW.id;
+
